@@ -1,23 +1,28 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-8oLn4w/r8430n4Z1a2TTSZWChbB0V8vgHbZTVdFpqVM='; connect-src 'none'; img-src 'none'; style-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-D5wIB6bymB/nEfNbh+SNFisINIHzoVMC4x9uGgM396g='; connect-src 'none'; img-src 'none'; style-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; worker-src 'none'">
 <title>VisibleBox</title></head><body><script>
 (function () {
     "use strict";
     // A page embedded by another website cannot read or change this profile.
     if(window.top!==window.self){document.title="VISIBLEBOX_BLOCKED_FRAME";return;}
-    var settingsKey="visiblebox_settings_v1",hotkeyKey="visiblebox_hotkey_v1",started=false,lastId=0;
+    var settingsKey="visiblebox_settings_v1",hotkeyKey="visiblebox_hotkey_v1",languageKey="visiblebox_language_v1",started=false,lastId=0;
     function object(value){return value && typeof value==="object" && !Array.isArray(value);}
     function keys(value,expected){return object(value) && Object.keys(value).sort().join(",")===expected;}
-    function ownKey(key){return key===settingsKey || key===hotkeyKey;}
+    function ownKey(key){return key===settingsKey || key===hotkeyKey || key===languageKey;}
     function hotkey(value){return typeof value==="string" && /^key_(?:rcontrol|lcontrol|ralt|lalt|rshift|lshift|insert|delete|home|end|pageup|pagedown|scrolllock|break|f(?:[1-9]|1[0-2]))$/.test(value);}
     function envelope(raw,key){
-        if(!ownKey(key) || typeof raw!=="string" || raw.length>(key===hotkeyKey?512:2048))throw new Error("Invalid payload");
+        if(!ownKey(key) || typeof raw!=="string" || raw.length>(key===settingsKey?2048:512))throw new Error("Invalid payload");
         var env=JSON.parse(raw),s=env&&env.settings;
         if(!object(env) || env.version!==1 || !Number.isSafeInteger(env.revision) || env.revision<0 ||
             env.revision>Math.min(9007199254740990,Date.now()+300000))throw new Error("Invalid version");
         if(key===hotkeyKey){
             if(!keys(env,"key,revision,version") || !hotkey(env.key))throw new Error("Invalid hotkey");
+            return env;
+        }
+        if(key===languageKey){
+            if(!keys(env,"language,revision,version") || typeof env.language!=="string" ||
+                !/^(?:en|ru|de|fr|es|it|pt|pl|nl|ro|zh-CN)$/.test(env.language))throw new Error("Invalid language");
             return env;
         }
         if(!keys(env,"revision,settings,version") || !keys(s,"buffColor,crateColor,distancePercent,thicknessPercent") ||
