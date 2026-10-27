@@ -1,20 +1,26 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-gZ9uIAHB/avAkMBpHPpumgM5z1GP/UxhVJD2SgBOTyU='; connect-src 'none'; img-src 'none'; style-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-8oLn4w/r8430n4Z1a2TTSZWChbB0V8vgHbZTVdFpqVM='; connect-src 'none'; img-src 'none'; style-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; worker-src 'none'">
 <title>VisibleBox</title></head><body><script>
 (function () {
     "use strict";
     // A page embedded by another website cannot read or change this profile.
     if(window.top!==window.self){document.title="VISIBLEBOX_BLOCKED_FRAME";return;}
-    var key="visiblebox_settings_v1",started=false,lastId=0;
+    var settingsKey="visiblebox_settings_v1",hotkeyKey="visiblebox_hotkey_v1",started=false,lastId=0;
     function object(value){return value && typeof value==="object" && !Array.isArray(value);}
     function keys(value,expected){return object(value) && Object.keys(value).sort().join(",")===expected;}
-    function envelope(raw){
-        if(typeof raw!=="string" || raw.length>2048)throw new Error("Invalid payload");
+    function ownKey(key){return key===settingsKey || key===hotkeyKey;}
+    function hotkey(value){return typeof value==="string" && /^key_(?:rcontrol|lcontrol|ralt|lalt|rshift|lshift|insert|delete|home|end|pageup|pagedown|scrolllock|break|f(?:[1-9]|1[0-2]))$/.test(value);}
+    function envelope(raw,key){
+        if(!ownKey(key) || typeof raw!=="string" || raw.length>(key===hotkeyKey?512:2048))throw new Error("Invalid payload");
         var env=JSON.parse(raw),s=env&&env.settings;
-        if(!keys(env,"revision,settings,version") || env.version!==1 || !Number.isSafeInteger(env.revision) || env.revision<0 ||
-            env.revision>Math.min(9007199254740990,Date.now()+300000) ||
-            !keys(s,"buffColor,crateColor,distancePercent,thicknessPercent") ||
+        if(!object(env) || env.version!==1 || !Number.isSafeInteger(env.revision) || env.revision<0 ||
+            env.revision>Math.min(9007199254740990,Date.now()+300000))throw new Error("Invalid version");
+        if(key===hotkeyKey){
+            if(!keys(env,"key,revision,version") || !hotkey(env.key))throw new Error("Invalid hotkey");
+            return env;
+        }
+        if(!keys(env,"revision,settings,version") || !keys(s,"buffColor,crateColor,distancePercent,thicknessPercent") ||
             !Number.isInteger(s.distancePercent) || s.distancePercent<50 || s.distancePercent>250 || s.distancePercent%10 ||
             !Number.isInteger(s.thicknessPercent) || s.thicknessPercent<50 || s.thicknessPercent>200 || s.thicknessPercent%10 ||
             typeof s.crateColor!=="string" || !/^#[0-9A-F]{6}$/i.test(s.crateColor) ||
@@ -27,23 +33,23 @@
         var message;
         try{
             message=JSON.parse(decodeURIComponent(location.hash.slice(1)));
-            if(keys(message,"key,nonce,op,version") && message.version===1 && message.op==="hello" && message.key===key &&
+            if(keys(message,"key,nonce,op,version") && message.version===1 && message.op==="hello" && message.key===settingsKey &&
                 Number.isSafeInteger(message.nonce) && message.nonce>0){
                 started=true;document.title="VISIBLEBOX_READY_V1:"+message.nonce;return;
             }
             // Opening a crafted link or reloading an old save URL must never write preferences.
             if(initial || !started)return;
             if(!object(message) || message.version!==1 || !Number.isSafeInteger(message.id) || message.id<=lastId || message.id<=0 ||
-                message.id>9007199254740990 || message.key!==key)throw new Error("Invalid request");
+                message.id>9007199254740990 || !ownKey(message.key))throw new Error("Invalid request");
             lastId=message.id;
-            var value=null,old,previous=null;
+            var key=message.key,value=null,old,previous=null;
             if(message.op==="load" && keys(message,"id,key,op,version")){
                 value=localStorage.getItem(key);
-                if(value!==null)try{envelope(value);}catch(corrupt){localStorage.removeItem(key);value=null;}
+                if(value!==null)try{envelope(value,key);}catch(corrupt){localStorage.removeItem(key);value=null;}
             }else if(message.op==="save" && keys(message,"id,key,op,value,version")){
-                var env=envelope(message.value);
+                var env=envelope(message.value,key);
                 old=localStorage.getItem(key);
-                try{previous=envelope(old);}catch(ignored){}
+                try{previous=envelope(old,key);}catch(ignored){}
                 // Only a fully validated old envelope can block a delayed writer.
                 if(previous && previous.revision>env.revision)throw new Error("Stale revision");
                 localStorage.setItem(key,message.value);
