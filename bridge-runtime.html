@@ -1,0 +1,125 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-NmndHCtMCXjqpa4LiDo8Q8A17ZIM7gg5oTdtgVAwhtc='; connect-src https://fjzhegkncabxdxrlgakz.supabase.co; img-src 'none'; style-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; worker-src 'none'">
+<title>VisibleBox</title></head><body><script>
+(function () {
+    "use strict";
+    // A page embedded by another website cannot read or change this profile.
+    if(window.top!==window.self){document.title="VISIBLEBOX_BLOCKED_FRAME";return;}
+    var settingsKey="visiblebox_settings_v1",hotkeyKey="visiblebox_hotkey_v1",languageKey="visiblebox_language_v1",visibilityKey="visiblebox_visibility_v1",started=false,lastId=0;
+    function object(value){return value && typeof value==="object" && !Array.isArray(value);}
+    function keys(value,expected){return object(value) && Object.keys(value).sort().join(",")===expected;}
+    function ownKey(key){return key===settingsKey || key===hotkeyKey || key===languageKey || key===visibilityKey;}
+    function hotkey(value){return typeof value==="string" && /^key_(?:rcontrol|lcontrol|ralt|lalt|rshift|lshift|insert|delete|home|end|pageup|pagedown|scrolllock|break|f(?:[1-9]|1[0-2]))$/.test(value);}
+    function envelope(raw,key){
+        if(!ownKey(key) || typeof raw!=="string" || raw.length>(key===settingsKey?2048:512))throw new Error("Invalid payload");
+        var env=JSON.parse(raw),s=env&&env.settings;
+        if(!object(env) || env.version!==1 || !Number.isSafeInteger(env.revision) || env.revision<0 ||
+            env.revision>Math.min(9007199254740990,Date.now()+300000))throw new Error("Invalid version");
+        if(key===hotkeyKey){
+            if(!keys(env,"key,revision,version") || !hotkey(env.key))throw new Error("Invalid hotkey");
+            return env;
+        }
+        if(key===languageKey){
+            if(!keys(env,"language,revision,version") || typeof env.language!=="string" ||
+                !/^(?:en|ru|de|fr|es|it|pt|pl|nl|ro|zh-CN)$/.test(env.language))throw new Error("Invalid language");
+            return env;
+        }
+        if(key===visibilityKey){
+            var fields=raw.match(/"(?:[^"\\]|\\.)*"\s*:/g);
+            if(!keys(env,"revision,showVisible,version") || !fields || fields.length!==3 || typeof env.showVisible!=="boolean")throw new Error("Invalid visibility");
+            return env;
+        }
+        if(!keys(env,"revision,settings,version") || !keys(s,"buffColor,crateColor,distancePercent,thicknessPercent") ||
+            !Number.isInteger(s.distancePercent) || s.distancePercent<50 || s.distancePercent>250 || s.distancePercent%10 ||
+            !Number.isInteger(s.thicknessPercent) || s.thicknessPercent<50 || s.thicknessPercent>200 || s.thicknessPercent%10 ||
+            typeof s.crateColor!=="string" || !/^#[0-9A-F]{6}$/i.test(s.crateColor) ||
+            typeof s.buffColor!=="string" || !/^#[0-9A-F]{6}$/i.test(s.buffColor))throw new Error("Invalid settings");
+        return env;
+    }
+    function answer(reply){document.title="VISIBLEBOX_REPLY_V1:"+encodeURIComponent(JSON.stringify(reply));}
+    var runtimeApi={"origin":"https://fjzhegkncabxdxrlgakz.supabase.co","publishableKey":"sb_publishable_w0wWNo8ZGBR3tcXiZM6aWA_QN3QWFl7"};
+    var runtimeKey="visiblebox_runtime_v1",runtimeTicketKey="visiblebox_runtime_ticket_v1";
+    var pairingCode=/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/,ticketPattern=/^[a-f0-9]{64}$/;
+
+    async function runtimeRpc(name,data){
+        var controller=new AbortController();
+        var timer=setTimeout(function(){controller.abort();},4000);
+        try{
+            var result=await fetch(runtimeApi.origin+"/rest/v1/rpc/"+name,{
+                method:"POST",cache:"no-store",credentials:"omit",redirect:"error",
+                headers:{"Content-Type":"application/json",apikey:runtimeApi.publishableKey},
+                body:JSON.stringify(data),signal:controller.signal
+            });
+            if(!result.ok)throw new Error("Access request rejected");
+            return await result.json();
+        }finally{clearTimeout(timer);}
+    }
+
+    async function runtimeRequest(message){
+        try{
+            var result;
+            if(message.op==="link-access" && keys(message,"id,key,op,value,version") &&
+                typeof message.value==="string" && pairingCode.test(message.value)){
+                var ticket=await runtimeRpc("visiblebox_pair_runtime",{code:message.value});
+                if(lastId!==message.id)return;
+                if(typeof ticket!=="string" || !ticketPattern.test(ticket))throw new Error("Invalid runtime ticket");
+                localStorage.setItem(runtimeTicketKey,ticket);
+                if(localStorage.getItem(runtimeTicketKey)!==ticket)throw new Error("Game profile storage unavailable");
+                result="linked";
+            }else if(message.op==="check-access" && keys(message,"id,key,op,version")){
+                var current=localStorage.getItem(runtimeTicketKey);
+                var lease=await runtimeRpc("visiblebox_runtime_permission",{
+                    runtime_ticket:ticketPattern.test(current || "")?current:null
+                });
+                if(lastId!==message.id)return;
+                if(!keys(lease,"status,valid_ms") || !Number.isInteger(lease.valid_ms) || lease.valid_ms<0 ||
+                    lease.valid_ms>60000 || ["active","link","expired"].indexOf(lease.status)<0 ||
+                    (lease.status==="active")!==(lease.valid_ms>0))throw new Error("Invalid access reply");
+                if(lease.status==="link" && current!==null && localStorage.getItem(runtimeTicketKey)===current)
+                    localStorage.removeItem(runtimeTicketKey);
+                result=JSON.stringify(lease);
+            }else throw new Error("Invalid access request");
+            answer({id:message.id,ok:true,value:result});
+        }catch(error){
+            if(lastId===message.id)answer({id:message.id,ok:false,value:null,error:"Access request failed"});
+        }
+    }
+
+    function process(initial){
+        if(!location.hash || location.hash.length>14000)return;
+        var message;
+        try{
+            message=JSON.parse(decodeURIComponent(location.hash.slice(1)));
+            if(keys(message,"key,nonce,op,version") && message.version===1 && message.op==="hello" && message.key===settingsKey &&
+                Number.isSafeInteger(message.nonce) && message.nonce>0){
+                started=true;document.title="VISIBLEBOX_READY_V1:"+message.nonce;return;
+            }
+            // Opening a crafted link or reloading an old save URL must never write preferences.
+            if(initial || !started)return;
+            if(!object(message) || message.version!==1 || !Number.isSafeInteger(message.id) || message.id<=lastId || message.id<=0 ||
+                message.id>9007199254740990 || (!ownKey(message.key) && message.key!==runtimeKey))throw new Error("Invalid request");
+            lastId=message.id;
+            if(message.key===runtimeKey){runtimeRequest(message);return;}
+            var key=message.key,value=null,old,previous=null;
+            if(message.op==="load" && keys(message,"id,key,op,version")){
+                value=localStorage.getItem(key);
+                if(value!==null)try{envelope(value,key);}catch(corrupt){localStorage.removeItem(key);value=null;}
+            }else if(message.op==="save" && keys(message,"id,key,op,value,version")){
+                var env=envelope(message.value,key);
+                old=localStorage.getItem(key);
+                try{previous=envelope(old,key);}catch(ignored){}
+                // Only a fully validated old envelope can block a delayed writer.
+                if(previous && previous.revision>env.revision)throw new Error("Stale revision");
+                localStorage.setItem(key,message.value);
+                if(localStorage.getItem(key)!==message.value)throw new Error("Write verification failed");
+            }else throw new Error("Unknown operation");
+            answer({id:message.id,ok:true,value:value});
+        }catch(error){if(object(message) && Number.isSafeInteger(message.id) && message.id>0)answer({id:message.id,ok:false,value:null,
+            error:String(error.name||"StorageError")+": "+String(error.message||error).slice(0,180)});}
+    }
+    addEventListener("hashchange",function(){process(false);});
+    document.title="VISIBLEBOX_PAGE_LOADED_V1";
+    process(true);
+})();
+</script></body></html>
