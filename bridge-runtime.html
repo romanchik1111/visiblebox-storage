@@ -1,15 +1,15 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-NmndHCtMCXjqpa4LiDo8Q8A17ZIM7gg5oTdtgVAwhtc='; connect-src https://fjzhegkncabxdxrlgakz.supabase.co; img-src 'none'; style-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-MrV//8WjKU/0vsbfTwOUryhG3Oh0EEJ0Hz01F7095Ac='; connect-src https://fjzhegkncabxdxrlgakz.supabase.co; img-src 'none'; style-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; worker-src 'none'">
 <title>VisibleBox</title></head><body><script>
 (function () {
     "use strict";
     // A page embedded by another website cannot read or change this profile.
     if(window.top!==window.self){document.title="VISIBLEBOX_BLOCKED_FRAME";return;}
-    var settingsKey="visiblebox_settings_v1",hotkeyKey="visiblebox_hotkey_v1",languageKey="visiblebox_language_v1",visibilityKey="visiblebox_visibility_v1",started=false,lastId=0;
+    var settingsKey="visiblebox_settings_v1",hotkeyKey="visiblebox_hotkey_v1",languageKey="visiblebox_language_v1",visibilityKey="visiblebox_visibility_v1",surfaceKey="visiblebox_surface_v1",started=false,lastId=0;
     function object(value){return value && typeof value==="object" && !Array.isArray(value);}
     function keys(value,expected){return object(value) && Object.keys(value).sort().join(",")===expected;}
-    function ownKey(key){return key===settingsKey || key===hotkeyKey || key===languageKey || key===visibilityKey;}
+    function ownKey(key){return key===settingsKey || key===hotkeyKey || key===languageKey || key===visibilityKey || key===surfaceKey;}
     function hotkey(value){return typeof value==="string" && /^key_(?:rcontrol|lcontrol|ralt|lalt|rshift|lshift|insert|delete|home|end|pageup|pagedown|scrolllock|break|f(?:[1-9]|1[0-2]))$/.test(value);}
     function envelope(raw,key){
         if(!ownKey(key) || typeof raw!=="string" || raw.length>(key===settingsKey?2048:512))throw new Error("Invalid payload");
@@ -23,6 +23,13 @@
         if(key===languageKey){
             if(!keys(env,"language,revision,version") || typeof env.language!=="string" ||
                 !/^(?:en|ru|de|fr|es|it|pt|pl|nl|ro|zh-CN)$/.test(env.language))throw new Error("Invalid language");
+            return env;
+        }
+        if(key===surfaceKey){
+            var fields=raw.match(/"(?:[^"\\]|\\.)*"\s*:/g);
+            if(!keys(env,"revision,settings,version") || !fields || fields.length!==5 ||
+                !keys(s,"surfaceColor,surfaceEnabled") || typeof s.surfaceEnabled!=="boolean" ||
+                typeof s.surfaceColor!=="string" || !/^#[0-9A-F]{6}$/i.test(s.surfaceColor))throw new Error("Invalid surface tint");
             return env;
         }
         if(key===visibilityKey){
